@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tmate.fullname" . }}-sessions
+  labels:
+    {{- include "tmate.labels" . | nindent 4 }}
+    {{ include "tmate.sessions.selectorLabels" .  | nindent 4 }}
+spec:
+  replicas: {{ .Values.sessions.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "tmate.sessions.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.sessions.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "tmate.sessions.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.sessions.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "tmate.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.sessions.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 5
+      volumes:
+      - name: secret-ssh-keys
+        secret:
+          secretName: ssh-keys
+      - name: tmate-unix-sockets
+        emptyDir: {}
+      containers:
+        - name: {{ .Chart.Name }}-ssh-server
+          securityContext:
+            {{- toYaml .Values.sessions.sshServer.securityContext | nindent 12 }}
+          image: "{{ .Values.sessions.sshServer.image.repository }}:{{ .Values.sessions.sshServer.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.sessions.sshServer.image.pullPolicy }}
+          env:
+            - name: HAS_WEBSOCKET
+              value: "1"
+            - name: SSH_KEYS_PATH
+              value: /etc/tmate-keys
+            - name: SSH_PORT_ADVERTISE
+              value: "22"
+            - name: SSH_HOSTNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "tmate.fullname" . }}
+                  key: hostname
+          ports:
+            - containerPort: 2200
+              name: ssh
+          volumeMounts:
+          - name: secret-ssh-keys
+            mountPath: /etc/tmate-keys
+          - name: tmate-unix-sockets
+            mountPath: /tmp/tmate/sessions 
+          readinessProbe:
+            tcpSocket:
+              port: 2200
+          resources:
+            {{- toYaml .Values.sessions.sshServer.resources | nindent 12 }}
+        - name: {{ .Chart.Name }}-websocket
+          securityContext:
+            {{- toYaml .Values.sessions.websocket.securityContext | nindent 12 }}
+          image: "{{ .Values.sessions.websocket.image.repository }}:{{ .Values.sessions.websocket.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.sessions.websocket.image.pullPolicy }}
+          env:
+          - name: DAEMON_HMAC_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ include "tmate.fullname" . }}
+                key: hmac_key
+          - name: WEBSOCKET_BASE_URL
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "tmate.fullname" . }}
+                key: websocket_base_url
+          - name: MASTER_BASE_URL
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "tmate.fullname" . }}
+                key: master_base_url
+          - name: USER_FACING_BASE_URL
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "tmate.fullname" . }}
+                key: user_facing_base_url
+          - name: INTERNAL_API_AUTH_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: {{ include "tmate.fullname" . }}
+                key: wsapi_key
+          - name: ERL_NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: ERL_COOKIE
+            valueFrom:
+              secretKeyRef:
+                name: {{ include "tmate.fullname" . }}
+                key: erl_cookie
+          ports:
+            - containerPort: 4001
+              name: http
+              protocol: TCP
+            - containerPort: 4002
+              name: daemon
+              protocol: TCP
+          volumeMounts:
+          - name: tmate-unix-sockets
+            mountPath: /tmp/tmate/sessions
+#          readinessProbe:
+#            tcpSocket:
+#              port: 4002
+          resources:
+            {{- toYaml .Values.sessions.websocket.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

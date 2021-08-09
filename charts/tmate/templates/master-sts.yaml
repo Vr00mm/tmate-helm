@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "tmate.fullname" . }}-master
+  labels:
+    {{- include "tmate.labels" . | nindent 4 }}
+    {{ include "tmate.master.selectorLabels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "tmate.fullname" . }}-master
+  {{- if not .Values.master.autoscaling.enabled }}
+  replicas: {{ .Values.master.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "tmate.master.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "tmate.master.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "tmate.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.master.image.repository }}:{{ .Values.master.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.master.image.pullPolicy }}
+          ports:
+          - containerPort: 4000
+            name: http
+          - containerPort: 9100
+            name: http-metrics
+          env:
+          - name: MASTER_BASE_URL
+            valueFrom:
+              configMapKeyRef:
+                name: {{ include "tmate.fullname" . }}
+                key: master_base_url
+          - name: SECRET_KEY_BASE
+            valueFrom:
+              secretKeyRef:
+                name: {{ include "tmate.fullname" . }}
+                key: secret_key_base
+          - name: INTERNAL_API_AUTH_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: {{ include "tmate.fullname" . }}
+                key: wsapi_key
+          - name: PG_URI
+            valueFrom:
+              secretKeyRef:
+                name: {{ include "tmate.fullname" . }}-db-postgres
+                key: pg_uri
+          - name: PG_POOLSIZE
+            value: "10"
+          - name: ERL_NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: ERL_COOKIE
+            valueFrom:
+              secretKeyRef:
+                name: {{ include "tmate.fullname" . }}
+                key: erl_cookie
+#          - name: MAILGUN_API_KEY
+#            valueFrom:
+#              secretKeyRef:
+#                name: {{ include "tmate.fullname" . }}
+#                key: mailgun_api_key
+#          - name: MAILGUN_DOMAIN
+#            value: "mail.tmate.io"
+#          livenessProbe:
+#            httpGet:
+#              path: /
+#              port: http
+#          readinessProbe:
+#            httpGet:
+#              path: /
+#              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
